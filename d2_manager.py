@@ -23,7 +23,7 @@ SETUP (one-time):
 import socket
 import time
 import threading
-from flask import Flask, render_template_string, jsonify, request
+from flask import Flask, render_template_string, jsonify, request, Response
 
 app = Flask(__name__)
 
@@ -400,6 +400,79 @@ def api_at():
     return jsonify({"result": result})
 
 
+# ─── PWA Routes ───────────────────────────────────────────────────────────────
+
+@app.route("/manifest.json")
+def manifest():
+    return jsonify({
+        "name": "D2-220G Manager",
+        "short_name": "D2 Manager",
+        "description": "Smart Bro GreenPacket D2-220G LTE Band & WiFi Manager",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0d1117",
+        "theme_color": "#006400",
+        "orientation": "portrait-primary",
+        "icons": [
+            {
+                "src": "/icon.svg",
+                "sizes": "any",
+                "type": "image/svg+xml",
+                "purpose": "any maskable"
+            }
+        ]
+    })
+
+
+@app.route("/sw.js")
+def service_worker():
+    sw = """
+const CACHE = 'D2-220G-v1';
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(['/'])));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', e => {
+  if (e.request.url.includes('/api/')) return; // API calls: network only
+  e.respondWith(
+    fetch(e.request)
+      .then(r => {
+        const clone = r.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+        return r;
+      })
+      .catch(() => caches.match(e.request))
+  );
+});
+""".strip()
+    return Response(sw, mimetype="application/javascript")
+
+
+@app.route("/icon.svg")
+def icon():
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#0d1117"/>
+  <rect x="56"  y="312" width="80" height="144" rx="10" fill="#006400"/>
+  <rect x="172" y="232" width="80" height="224" rx="10" fill="#15803d"/>
+  <rect x="288" y="152" width="80" height="304" rx="10" fill="#16a34a"/>
+  <rect x="404" y="72"  width="80" height="384" rx="10" fill="#4ade80"/>
+  <text x="256" y="500" font-family="'Segoe UI',system-ui,sans-serif" font-size="48"
+        font-weight="700" fill="#4ade80" text-anchor="middle">D2</text>
+</svg>"""
+    return Response(svg, mimetype="image/svg+xml")
+
+
 # ─── HTML Template ────────────────────────────────────────────────────────────
 
 HTML = """<!DOCTYPE html>
@@ -408,6 +481,12 @@ HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>D2-220G Manager</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#006400">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="D2 Manager">
+<link rel="apple-touch-icon" href="/icon.svg">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #e0e0e0; min-height: 100vh; }
@@ -1008,6 +1087,10 @@ async function changeImei() {
 // ─── Init ────────────────────────────────────────────────────────────────────
 checkStatus();
 setInterval(checkStatus, 60000); // re-check every 60s
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>"""
